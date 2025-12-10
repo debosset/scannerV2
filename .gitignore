@@ -1,0 +1,12 @@
+# Caches Python
+__pycache__/
+dashboard/__pycache__/
+generator/__pycache__/
+
+# DB & gros fichiers du generator
+generator/bitcoin_addresses.db
+generator/bitcoin_addresses.txt.gz
+
+# Fichiers de status générés
+generator/status.json
+generator/total_keys_generator.json
