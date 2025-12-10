@@ -22,7 +22,7 @@ TEMPLATE = """
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <title>BTC Scanner - Monitor</title>
+  <title>Monitor</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <!-- Tailwind CSS -->
@@ -145,7 +145,7 @@ TEMPLATE = """
 
         document.getElementById('cpu').textContent = sys.cpu_text || '-';
         document.getElementById('ram').textContent = sys.ram_text || '-';
-        document.getElementById('temp').textContent = sys.temp_text || '-';
+        //document.getElementById('temp').textContent = sys.temp_text || '-';
       } catch (e) {
         console.error('Erreur fetch status:', e);
       }
@@ -164,24 +164,9 @@ TEMPLATE = """
     <div class="flex items-center justify-between gap-4 mb-6">
       <div>
         <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">
-          <span class="text-slate-200">BTC Scanner</span>
+          <span class="text-slate-200">Scanner</span>
           <span class="text-slate-500"> · Monitor</span>
         </h1>
-        <p class="text-xs text-slate-500 mt-1">
-          Status du générateur · Source&nbsp;
-          <code class="px-2 py-1 rounded bg-slate-900/80 border border-slate-700/80 text-[10px]">
-            generator/status.json
-          </code>
-        </p>
-      </div>
-      <div class="flex flex-col items-end gap-2">
-        <div class="flex items-center gap-2">
-          <span class="dot-live"></span>
-          <span class="badge-live">Scanner actif</span>
-        </div>
-        <p class="text-[11px] text-slate-500">
-          Dernière mise à jour:&nbsp;<span id="last_update">-</span>
-        </p>
       </div>
     </div>
 
@@ -248,7 +233,7 @@ TEMPLATE = """
             <span class="text-sm text-slate-500 ml-1">keys/jour</span>
           </div>
           <p class="text-[11px] text-slate-500 mt-1">
-            Projection si le rythme actuel est maintenu 24h/24.
+            Estimation basée sur la vitesse actuelle.
           </p>
         </div>
 
@@ -257,24 +242,26 @@ TEMPLATE = """
       <!-- Ligne 3 : Résultats BTC -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
 
-        <div class="metric-card p-4">
-          <div class="metric-label mb-1">BTC · hits (balance &gt; 0)</div>
-          <div class="metric-main text-emerald-300" id="btc_hits">-</div>
-          <p class="text-[11px] text-slate-500 mt-1">
-            Nombre de cas où un solde positif a été détecté.
-          </p>
-        </div>
-
-        <div class="metric-card p-4">
-          <div class="metric-label mb-1">BTC · adresses connues</div>
+      <div class="metric-card p-4">
+          <div class="metric-label mb-1">Adresse DB</div>
           <div class="metric-main text-amber-300" id="btc_matches">-</div>
           <p class="text-[11px] text-slate-500 mt-1">
-            Nombre d'adresses générées qui existent dans la base.
+            Nombre d'adresses générées qui matchent dans la base de donnée.
           </p>
         </div>
 
         <div class="metric-card p-4">
-          <div class="metric-label mb-1">Adresse BTC · dernière générée</div>
+          <div class="metric-label mb-1">Adresse sold</div>
+          <div class="metric-main text-emerald-300" id="btc_hits">-</div>
+          <p class="text-[11px] text-slate-500 mt-1">
+            Solde vérifié avec API blockchain.
+          </p>
+        </div>
+
+        
+
+        <div class="metric-card p-4">
+          <div class="metric-label mb-1">Dernière addresse générée</div>
           <div class="mt-2 mono-box p-3 text-[10px] tracking-tight text-sky-200 break-all" id="last_addr">-</div>
         </div>
 
@@ -291,11 +278,6 @@ TEMPLATE = """
         <div>
           <div class="sys-label mb-1">RAM</div>
           <div class="text-sm font-medium text-slate-100" id="ram">-</div>
-        </div>
-
-        <div>
-          <div class="sys-label mb-1">Température</div>
-          <div class="text-sm font-medium text-slate-100" id="temp">-</div>
         </div>
 
       </div>
