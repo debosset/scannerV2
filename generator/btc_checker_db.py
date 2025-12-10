@@ -41,10 +41,10 @@ TOTAL_KEYS_FILE = os.path.join(BASE_DIR, "total_keys_generator.json")
 DB_FILE = os.path.join(BASE_DIR, "bitcoin_addresses.db")
 
 # Optimization parameters
-BATCH_SIZE = 50          # Keys per batch (augmenté car BTC uniquement)
-BUFFER_SIZE = 100        # Log buffer size
-CACHE_SIZE = 10000       # Address cache size
-STATUS_INTERVAL = 30.0   # Status update interval (seconds)
+BATCH_SIZE = 100          # boost vitesse
+BUFFER_SIZE = 200         # réduit I/O
+CACHE_SIZE = 1000         # suffisant
+STATUS_INTERVAL = 20.0    # refresh dashboard correct sans trop d’I/O
 
 
 class BTCAddressChecker:
