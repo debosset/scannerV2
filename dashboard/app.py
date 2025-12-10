@@ -58,7 +58,7 @@ TEMPLATE = """
         // Système
         document.getElementById('cpu').textContent = sys.cpu_text || '-';
         document.getElementById('ram').textContent = sys.ram_text || '-';
-        document.getElementById('temp').textContent = sys.temp_text || '-';
+        //document.getElementById('temp').textContent = sys.temp_text || '-';
       } catch (e) {
         console.error('Erreur fetch status:', e);
       }
