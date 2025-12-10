@@ -71,32 +71,6 @@ TEMPLATE = """
       font-weight: 600;
     }
 
-    .badge-live {
-      font-size: 0.7rem;
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-      padding: 0.18rem 0.6rem;
-      border-radius: 999px;
-      border: 1px solid rgba(34, 197, 94, 0.7);
-      background: radial-gradient(circle at top left, rgba(34, 197, 94, 0.18), transparent 70%);
-      color: #bbf7d0;
-    }
-
-    .dot-live {
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
-      background: #22c55e;
-      box-shadow: 0 0 12px rgba(34, 197, 94, 0.9);
-      animation: pulse 1.4s infinite;
-    }
-
-    @keyframes pulse {
-      0%   { transform: scale(1);   opacity: 1; }
-      60%  { transform: scale(1.8); opacity: 0; }
-      100% { transform: scale(1);   opacity: 0; }
-    }
-
     .mono-box {
       background: #020617;
       border-radius: 0.75rem;
@@ -127,25 +101,37 @@ TEMPLATE = """
 
         document.getElementById('keys_session').textContent =
           (gen.keys_tested || 0).toLocaleString('fr-CH');
+
         document.getElementById('keys_total').textContent =
           (gen.total_keys_tested || 0).toLocaleString('fr-CH');
 
         document.getElementById('speed_sec').textContent =
           speed.toFixed(2);
+
         document.getElementById('speed_min').textContent =
           kpm.toLocaleString('fr-CH', { maximumFractionDigits: 0 });
+
         document.getElementById('speed_day').textContent =
           kpd.toLocaleString('fr-CH', { maximumFractionDigits: 0 });
 
-        document.getElementById('btc_hits').textContent = gen.btc_hits || 0;
-        document.getElementById('btc_matches').textContent = gen.btc_address_matches || 0;
-        document.getElementById('elapsed').textContent = gen.elapsed_human || '-';
-        document.getElementById('last_addr').textContent = gen.last_btc_address || '-';
-        document.getElementById('last_update').textContent = gen.last_update || '-';
+        document.getElementById('btc_hits').textContent =
+          gen.btc_hits || 0;
 
-        document.getElementById('cpu').textContent = sys.cpu_text || '-';
-        document.getElementById('ram').textContent = sys.ram_text || '-';
-        //document.getElementById('temp').textContent = sys.temp_text || '-';
+        document.getElementById('btc_matches').textContent =
+          gen.btc_address_matches || 0;
+
+        document.getElementById('elapsed').textContent =
+          gen.elapsed_human || '-';
+
+        document.getElementById('last_addr').textContent =
+          gen.last_btc_address || '-';
+
+        document.getElementById('cpu').textContent =
+          sys.cpu_text || '-';
+
+        document.getElementById('ram').textContent =
+          sys.ram_text || '-';
+
       } catch (e) {
         console.error('Erreur fetch status:', e);
       }
@@ -153,7 +139,7 @@ TEMPLATE = """
 
     document.addEventListener('DOMContentLoaded', () => {
       fetchStatus();
-      setInterval(fetchStatus, 2000); // Refresh toutes les 2 secondes
+      setInterval(fetchStatus, 2000);
     });
   </script>
 </head>
@@ -161,42 +147,29 @@ TEMPLATE = """
   <div class="max-w-6xl mx-auto px-4 py-8">
 
     <!-- Header -->
-    <div class="flex items-center justify-between gap-4 mb-6">
-      <div>
-        <h1 class="text-2xl md:text-3xl font-semibold tracking-tight">
-          <span class="text-slate-200">Scanner</span>
-          <span class="text-slate-500"> · Monitor</span>
-        </h1>
-      </div>
-    </div>
+    <h1 class="text-2xl md:text-3xl font-semibold tracking-tight mb-6">
+      <span class="text-slate-200">Scanner</span>
+      <span class="text-slate-500"> · Monitor</span>
+    </h1>
 
     <div class="glass p-5 md:p-6 space-y-6">
 
-      <!-- Ligne 1 : Clés & vitesse -->
+      <!-- Ligne 1 -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
 
         <div class="metric-card p-4">
           <div class="metric-label mb-1">Clés testées · session</div>
           <div class="metric-main text-emerald-400" id="keys_session">-</div>
-          <p class="text-[11px] text-slate-500 mt-1">
-            Depuis le dernier démarrage du générateur.
-          </p>
         </div>
 
         <div class="metric-card p-4">
           <div class="metric-label mb-1">Clés testées · total</div>
           <div class="metric-main text-sky-400" id="keys_total">-</div>
-          <p class="text-[11px] text-slate-500 mt-1">
-            Cumul historique (persisté dans total_keys_generator.json).
-          </p>
         </div>
 
         <div class="metric-card p-4">
           <div class="metric-label mb-1">Uptime · session</div>
           <div class="metric-main text-slate-100" id="elapsed">-</div>
-          <p class="text-[11px] text-slate-500 mt-1">
-            Temps écoulé depuis le lancement du générateur.
-          </p>
         </div>
 
       </div>
@@ -210,9 +183,6 @@ TEMPLATE = """
             <span id="speed_sec">-</span>
             <span class="text-sm text-slate-500 ml-1">keys/s</span>
           </div>
-          <p class="text-[11px] text-slate-500 mt-1">
-            Vitesse instantanée calculée sur la session courante.
-          </p>
         </div>
 
         <div class="metric-card p-4">
@@ -221,9 +191,6 @@ TEMPLATE = """
             <span id="speed_min">-</span>
             <span class="text-sm text-slate-500 ml-1">keys/min</span>
           </div>
-          <p class="text-[11px] text-slate-500 mt-1">
-            Estimation basée sur la vitesse actuelle.
-          </p>
         </div>
 
         <div class="metric-card p-4">
@@ -232,43 +199,32 @@ TEMPLATE = """
             <span id="speed_day">-</span>
             <span class="text-sm text-slate-500 ml-1">keys/jour</span>
           </div>
-          <p class="text-[11px] text-slate-500 mt-1">
-            Estimation basée sur la vitesse actuelle.
-          </p>
         </div>
 
       </div>
 
-      <!-- Ligne 3 : Résultats BTC -->
+      <!-- Résultats BTC -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
 
-      <div class="metric-card p-4">
+        <div class="metric-card p-4">
           <div class="metric-label mb-1">Adresse DB</div>
           <div class="metric-main text-amber-300" id="btc_matches">-</div>
-          <p class="text-[11px] text-slate-500 mt-1">
-            Nombre d'adresses générées qui matchent dans la base de donnée.
-          </p>
         </div>
 
         <div class="metric-card p-4">
           <div class="metric-label mb-1">Adresse sold</div>
           <div class="metric-main text-emerald-300" id="btc_hits">-</div>
-          <p class="text-[11px] text-slate-500 mt-1">
-            Solde vérifié avec API blockchain.
-          </p>
         </div>
 
-        
-
         <div class="metric-card p-4">
-          <div class="metric-label mb-1">Dernière addresse générée</div>
+          <div class="metric-label mb-1">Dernière adresse générée</div>
           <div class="mt-2 mono-box p-3 text-[10px] tracking-tight text-sky-200 break-all" id="last_addr">-</div>
         </div>
 
       </div>
 
       <!-- Ligne 4 : Système -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t border-slate-800/70">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-800/70">
 
         <div>
           <div class="sys-label mb-1">CPU</div>
@@ -288,7 +244,6 @@ TEMPLATE = """
 </html>
 """
 
-
 def human_readable_time(seconds: float) -> str:
     try:
         seconds = int(seconds)
@@ -302,7 +257,6 @@ def human_readable_time(seconds: float) -> str:
         return f"{m}m {s:02d}s"
     else:
         return f"{s}s"
-
 
 def default_status():
     return {
@@ -318,7 +272,6 @@ def default_status():
         "keys_per_minute": 0.0,
         "keys_per_day": 0.0,
     }
-
 
 def load_generator_status():
     if not os.path.exists(GEN_STATUS):
@@ -347,13 +300,11 @@ def load_generator_status():
         "keys_per_day": speed * 86400,
     }
 
-
 def get_system_status():
     if psutil is None:
         return {
             "cpu_text": "psutil non installé",
             "ram_text": "-",
-            "temp_text": "-",
         }
 
     try:
@@ -363,32 +314,20 @@ def get_system_status():
         total_gb = mem.total / (1024**3)
         ram_text = f"{used_gb:.1f} / {total_gb:.1f} GB ({mem.percent:.0f}%)"
 
-        temps = psutil.sensors_temperatures() if hasattr(psutil, "sensors_temperatures") else {}
-        temp_str = "-"
-        if temps:
-            for name, entries in temps.items():
-                if entries:
-                    temp_str = f"{entries[0].current:.1f} °C ({name})"
-                    break
-
         return {
             "cpu_text": f"{cpu:.1f} %",
             "ram_text": ram_text,
-            "temp_text": temp_str,
         }
 
     except Exception:
         return {
             "cpu_text": "-",
             "ram_text": "-",
-            "temp_text": "-",
         }
-
 
 @app.route("/")
 def index():
     return render_template_string(TEMPLATE)
-
 
 @app.route("/api/status")
 def api_status():
@@ -397,7 +336,6 @@ def api_status():
         "system": get_system_status(),
         "timestamp": time.time(),
     })
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
