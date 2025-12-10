@@ -6,7 +6,7 @@ import time
 try:
     import psutil
 except ImportError:
-    psutil = None  # le dashboard fonctionnera quand même sans psutil
+    psutil = None  # Le dashboard fonctionnera quand même sans psutil
 
 app = Flask(__name__)
 
@@ -22,17 +22,108 @@ TEMPLATE = """
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <title>BTC Checker Dashboard</title>
+  <title>Dashboard</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
 
   <style>
+    :root {
+      --bg-main: #020617;
+      --bg-gradient: radial-gradient(circle at top left, #0f172a, #020617 55%);
+      --neon-cyan: #22d3ee;
+      --neon-purple: #a855f7;
+      --neon-pink: #ec4899;
+      --card-bg: rgba(15, 23, 42, 0.85);
+      --card-border: rgba(56, 189, 248, 0.4);
+    }
+
     body {
-      background: #0f172a;
+      background: var(--bg-gradient);
       color: #e5e7eb;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .neon-title {
+      background: linear-gradient(120deg, var(--neon-cyan), var(--neon-purple), var(--neon-pink));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      text-shadow: 0 0 18px rgba(236, 72, 153, 0.25);
+    }
+
+    .neon-card {
+      background: var(--card-bg);
+      border-radius: 1.25rem;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      box-shadow:
+        0 0 25px rgba(15, 23, 42, 0.9),
+        0 0 18px rgba(56, 189, 248, 0.12);
+      backdrop-filter: blur(16px);
+    }
+
+    .neon-card-accent {
+      border-image: linear-gradient(135deg, var(--neon-cyan), var(--neon-purple)) 1;
+      border-width: 1px;
+      border-style: solid;
+      box-shadow:
+        0 0 25px rgba(15, 23, 42, 0.9),
+        0 0 22px rgba(129, 140, 248, 0.38);
+    }
+
+    .neon-chip {
+      font-size: 0.7rem;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      border-radius: 999px;
+      padding: 0.2rem 0.6rem;
+      background: radial-gradient(circle, rgba(56, 189, 248, 0.2), transparent 65%);
+      border: 1px solid rgba(56, 189, 248, 0.6);
+      color: #e0f2fe;
+    }
+
+    .glow-text {
+      text-shadow:
+        0 0 12px rgba(34, 211, 238, 0.6),
+        0 0 28px rgba(129, 140, 248, 0.4);
+    }
+
+    .mono-box {
+      background: radial-gradient(circle at top left, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.98));
+      box-shadow: 0 0 18px rgba(15, 23, 42, 0.95);
+    }
+
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--neon-cyan);
+      box-shadow: 0 0 10px rgba(34, 211, 238, 0.9);
+      animation: pulse 1.6s infinite;
+    }
+
+    @keyframes pulse {
+      0% {
+        transform: scale(1);
+        opacity: 1;
+      }
+      70% {
+        transform: scale(1.8);
+        opacity: 0;
+      }
+      100% {
+        transform: scale(1);
+        opacity: 0;
+      }
+    }
+
+    .scan-grid {
+      background-image: linear-gradient(rgba(30, 64, 175, 0.18) 1px, transparent 1px),
+                        linear-gradient(90deg, rgba(30, 64, 175, 0.18) 1px, transparent 1px);
+      background-size: 22px 22px;
+      opacity: 0.25;
+      pointer-events: none;
     }
   </style>
 
@@ -45,15 +136,28 @@ TEMPLATE = """
         const gen = data.generator || {};
         const sys = data.system || {};
 
+        // Valeurs avec fallback
+        const speed = gen.speed_keys_per_sec || 0;
+        const kpm = gen.keys_per_minute || 0;
+        const kpd = gen.keys_per_day || 0;
+
         // Générateur
-        document.getElementById('keys_session').textContent = gen.keys_tested.toLocaleString('fr-CH');
-        document.getElementById('keys_total').textContent = gen.total_keys_tested.toLocaleString('fr-CH');
-        document.getElementById('btc_hits').textContent = gen.btc_hits;
-        document.getElementById('btc_matches').textContent = gen.btc_address_matches;
-        document.getElementById('speed').textContent = gen.speed_keys_per_sec.toFixed(2) + ' keys/sec';
-        document.getElementById('elapsed').textContent = gen.elapsed_human;
+        document.getElementById('keys_session').textContent =
+          (gen.keys_tested || 0).toLocaleString('fr-CH');
+        document.getElementById('keys_total').textContent =
+          (gen.total_keys_tested || 0).toLocaleString('fr-CH');
+        document.getElementById('btc_hits').textContent = gen.btc_hits || 0;
+        document.getElementById('btc_matches').textContent = gen.btc_address_matches || 0;
+        document.getElementById('speed').textContent =
+          speed.toFixed(2) + ' keys/sec';
+        document.getElementById('elapsed').textContent = gen.elapsed_human || '-';
         document.getElementById('last_addr').textContent = gen.last_btc_address || '-';
         document.getElementById('last_update').textContent = gen.last_update || '-';
+
+        document.getElementById('keys_per_min').textContent =
+          kpm.toLocaleString('fr-CH', { maximumFractionDigits: 0 });
+        document.getElementById('keys_per_day').textContent =
+          kpd.toLocaleString('fr-CH', { maximumFractionDigits: 0 });
 
         // Système
         document.getElementById('cpu').textContent = sys.cpu_text || '-';
@@ -66,71 +170,121 @@ TEMPLATE = """
 
     document.addEventListener('DOMContentLoaded', () => {
       fetchStatus();
-      setInterval(fetchStatus, 5000); // toutes les 5s
+      setInterval(fetchStatus, 2000); // Refresh toutes les 2 secondes
     });
   </script>
 </head>
-<body class="min-h-screen">
-  <div class="max-w-6xl mx-auto px-4 py-6">
-    <h1 class="text-3xl font-bold mb-2">BTC Checker Dashboard</h1>
-    <p class="text-sm text-slate-400 mb-6">
-      Source: <code class="bg-slate-800 px-2 py-1 rounded">generator/status.json</code>
-    </p>
+<body class="min-h-screen relative overflow-hidden">
+  <!-- Grid overlay pour le style "scanner" -->
+  <div class="scan-grid absolute inset-0 pointer-events-none"></div>
 
+  <div class="max-w-6xl mx-auto px-4 py-8 relative z-10">
+    <!-- Header -->
+    <div class="flex items-center justify-between gap-4 mb-6">
+      <div>
+        <h1 class="text-3xl md:text-4xl font-bold neon-title mb-2">
+          Dashboard
+        </h1>
+      </div>
+      <div class="flex flex-col items-end gap-2">
+        <div class="flex items-center gap-2">
+          <span class="pulse-dot"></span>
+          <span class="text-[11px] uppercase tracking-[0.18em] text-sky-300">
+            Scanner actif
+          </span>
+        </div>
+        <span class="neon-chip">
+          BTC ONLY • MONITOR
+        </span>
+      </div>
+    </div>
+
+    <!-- Bloc 1 : Stats principales -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-      <div class="bg-slate-800/80 rounded-2xl p-4 shadow">
-        <h2 class="text-sm text-slate-400 mb-1">Clés testées (session)</h2>
-        <p class="text-2xl font-semibold" id="keys_session">-</p>
+      <div class="neon-card p-4">
+        <div class="flex items-center justify-between mb-1">
+          <h2 class="text-xs text-slate-400 uppercase tracking-widest">Clés testées (session)</h2>
+          <span class="text-[10px] text-slate-500">live</span>
+        </div>
+        <p class="text-2xl md:text-3xl font-semibold glow-text" id="keys_session">-</p>
       </div>
-      <div class="bg-slate-800/80 rounded-2xl p-4 shadow">
-        <h2 class="text-sm text-slate-400 mb-1">Total de clés testées</h2>
-        <p class="text-2xl font-semibold" id="keys_total">-</p>
+
+      <div class="neon-card p-4">
+        <div class="flex items-center justify-between mb-1">
+          <h2 class="text-xs text-slate-400 uppercase tracking-widest">Total de clés testées</h2>
+          <span class="text-[10px] text-slate-500">global</span>
+        </div>
+        <p class="text-2xl md:text-3xl font-semibold text-sky-300" id="keys_total">-</p>
       </div>
-      <div class="bg-slate-800/80 rounded-2xl p-4 shadow">
-        <h2 class="text-sm text-slate-400 mb-1">Vitesse</h2>
-        <p class="text-2xl font-semibold" id="speed">-</p>
+
+      <div class="neon-card neon-card-accent p-4">
+        <div class="flex items-center justify-between mb-1">
+          <h2 class="text-xs text-slate-300 uppercase tracking-widest">Vitesse instantanée</h2>
+          <span class="text-[10px] text-sky-300/80">k/sec</span>
+        </div>
+        <p class="text-2xl md:text-3xl font-semibold text-sky-200 glow-text" id="speed">-</p>
       </div>
     </div>
 
+    <!-- Bloc 2 : Estimations -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-      <div class="bg-emerald-900/70 rounded-2xl p-4 shadow">
-        <h2 class="text-sm text-emerald-200 mb-1">BTC hits (balance &gt; 0)</h2>
-        <p class="text-2xl font-semibold text-emerald-300" id="btc_hits">-</p>
+      <div class="neon-card p-4">
+        <h2 class="text-xs text-yellow-200 uppercase tracking-widest mb-1">Keys / minute</h2>
+        <p class="text-2xl font-semibold text-yellow-300" id="keys_per_min">-</p>
       </div>
-      <div class="bg-indigo-900/70 rounded-2xl p-4 shadow">
-        <h2 class="text-sm text-indigo-200 mb-1">BTC matchs (adresse connue)</h2>
-        <p class="text-2xl font-semibold text-indigo-300" id="btc_matches">-</p>
+      <div class="neon-card p-4">
+        <h2 class="text-xs text-orange-200 uppercase tracking-widest mb-1">Keys / jour</h2>
+        <p class="text-2xl font-semibold text-orange-300" id="keys_per_day">-</p>
       </div>
-      <div class="bg-slate-800/80 rounded-2xl p-4 shadow">
-        <h2 class="text-sm text-slate-400 mb-1">Temps écoulé (session)</h2>
-        <p class="text-2xl font-semibold" id="elapsed">-</p>
+      <div class="neon-card p-4">
+        <h2 class="text-xs text-slate-300 uppercase tracking-widest mb-1">Uptime (session)</h2>
+        <p class="text-2xl font-semibold text-slate-100" id="elapsed">-</p>
       </div>
     </div>
 
-    <div class="bg-slate-800/80 rounded-2xl p-4 shadow mb-6">
-      <h2 class="text-sm text-slate-400 mb-1">Dernière adresse BTC générée</h2>
-      <p class="font-mono text-sm break-all bg-slate-900/80 p-3 rounded-xl mt-1" id="last_addr">-</p>
-      <p class="text-xs text-slate-500 mt-2">Dernière mise à jour: <span id="last_update">-</span></p>
+    <!-- Bloc 3 : Résultats BTC -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <div class="neon-card p-4">
+        <h2 class="text-xs text-emerald-200 uppercase tracking-widest mb-1">
+          BTC hits (balance &gt; 0)
+        </h2>
+        <p class="text-3xl font-semibold text-emerald-300" id="btc_hits">-</p>
+      </div>
+      <div class="neon-card p-4">
+        <h2 class="text-xs text-indigo-200 uppercase tracking-widest mb-1">
+          BTC matchs (adresse connue)
+        </h2>
+        <p class="text-3xl font-semibold text-indigo-300" id="btc_matches">-</p>
+      </div>
     </div>
 
+    <!-- Bloc 4 : Dernière adresse -->
+    <div class="neon-card p-4 mb-6">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-xs text-slate-300 uppercase tracking-widest">Dernière adresse BTC générée</h2>
+        <span class="text-[10px] text-slate-500">
+          Dernière maj:&nbsp;<span id="last_update">-</span>
+        </span>
+      </div>
+      <p class="font-mono text-[11px] md:text-xs break-all mono-box p-3 rounded-xl mt-1 border border-slate-800" id="last_addr">-</p>
+    </div>
+
+    <!-- Bloc 5 : Infos système -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <div class="bg-slate-800/80 rounded-2xl p-4 shadow">
-        <h2 class="text-sm text-slate-400 mb-1">CPU</h2>
-        <p class="text-lg font-semibold" id="cpu">-</p>
+      <div class="neon-card p-4">
+        <h2 class="text-xs text-slate-400 uppercase tracking-widest mb-1">CPU</h2>
+        <p class="text-lg font-semibold text-sky-200" id="cpu">-</p>
       </div>
-      <div class="bg-slate-800/80 rounded-2xl p-4 shadow">
-        <h2 class="text-sm text-slate-400 mb-1">RAM</h2>
+      <div class="neon-card p-4">
+        <h2 class="text-xs text-slate-400 uppercase tracking-widest mb-1">RAM</h2>
         <p class="text-lg font-semibold" id="ram">-</p>
-      </div>
-      <div class="bg-slate-800/80 rounded-2xl p-4 shadow">
-        <h2 class="text-sm text-slate-400 mb-1">Température</h2>
-        <p class="text-lg font-semibold" id="temp">-</p>
       </div>
     </div>
   </div>
 </body>
 </html>
 """
+
 
 def human_readable_time(seconds: float) -> str:
     try:
@@ -147,57 +301,48 @@ def human_readable_time(seconds: float) -> str:
         return f"{s}s"
 
 
+def default_status():
+    return {
+        "keys_tested": 0,
+        "total_keys_tested": 0,
+        "btc_hits": 0,
+        "btc_address_matches": 0,
+        "last_btc_address": "",
+        "speed_keys_per_sec": 0.0,
+        "elapsed_seconds": 0.0,
+        "elapsed_human": "-",
+        "last_update": "-",
+        "keys_per_minute": 0.0,
+        "keys_per_day": 0.0,
+    }
+
+
 def load_generator_status():
     """Charge le status du fichier generator/status.json"""
     if not os.path.exists(GEN_STATUS):
-        return {
-            "keys_tested": 0,
-            "total_keys_tested": 0,
-            "btc_hits": 0,
-            "btc_address_matches": 0,
-            "last_btc_address": "",
-            "speed_keys_per_sec": 0.0,
-            "elapsed_seconds": 0.0,
-            "elapsed_human": "-",
-            "last_update": None,
-        }
+        return default_status()
 
     try:
         with open(GEN_STATUS, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
-        return {
-            "keys_tested": 0,
-            "total_keys_tested": 0,
-            "btc_hits": 0,
-            "btc_address_matches": 0,
-            "last_btc_address": "",
-            "speed_keys_per_sec": 0.0,
-            "elapsed_seconds": 0.0,
-            "elapsed_human": "-",
-            "last_update": None,
-        }
+        return default_status()
 
-    # On normalise les champs pour éviter les KeyError
-    keys_tested = int(data.get("keys_tested", 0))
-    total_keys_tested = int(data.get("total_keys_tested", 0))
-    btc_hits = int(data.get("btc_hits", 0))
-    btc_matches = int(data.get("btc_address_matches", 0))
-    last_addr = data.get("last_btc_address", "")
     speed = float(data.get("speed_keys_per_sec", 0.0))
     elapsed = float(data.get("elapsed_seconds", 0.0))
-    last_update = data.get("last_update")
 
     return {
-        "keys_tested": keys_tested,
-        "total_keys_tested": total_keys_tested,
-        "btc_hits": btc_hits,
-        "btc_address_matches": btc_matches,
-        "last_btc_address": last_addr,
+        "keys_tested": int(data.get("keys_tested", 0)),
+        "total_keys_tested": int(data.get("total_keys_tested", 0)),
+        "btc_hits": int(data.get("btc_hits", 0)),
+        "btc_address_matches": int(data.get("btc_address_matches", 0)),
+        "last_btc_address": data.get("last_btc_address", ""),
         "speed_keys_per_sec": speed,
         "elapsed_seconds": elapsed,
         "elapsed_human": human_readable_time(elapsed),
-        "last_update": last_update,
+        "last_update": data.get("last_update") or "-",
+        "keys_per_minute": speed * 60,
+        "keys_per_day": speed * 86400,
     }
 
 
@@ -211,7 +356,7 @@ def get_system_status():
         }
 
     try:
-        cpu = psutil.cpu_percent(interval=0.5)
+        cpu = psutil.cpu_percent(interval=0.0)  # instantané
         mem = psutil.virtual_memory()
         used_gb = mem.used / (1024**3)
         total_gb = mem.total / (1024**3)
@@ -220,7 +365,6 @@ def get_system_status():
         temps = psutil.sensors_temperatures() if hasattr(psutil, "sensors_temperatures") else {}
         temp_str = "-"
         if temps:
-            # On prend le premier capteur dispo
             for name, entries in temps.items():
                 if entries:
                     temp_str = f"{entries[0].current:.1f} °C ({name})"
@@ -246,15 +390,12 @@ def index():
 
 @app.route("/api/status")
 def api_status():
-    gen_status = load_generator_status()
-    sys_status = get_system_status()
     return jsonify({
-        "generator": gen_status,
-        "system": sys_status,
+        "generator": load_generator_status(),
+        "system": get_system_status(),
         "timestamp": time.time(),
     })
 
 
 if __name__ == "__main__":
-    # Lancement en mode "prod simple"
     app.run(host="0.0.0.0", port=5000, debug=False)
