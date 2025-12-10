@@ -2,16 +2,17 @@
 # -*- coding: utf-8 -*-
 
 """
-Bitcoin Address Checker with Database Verification
-Version 4.0 - BTC uniquement avec vérification SQLite
+Bitcoin Address Checker - OPTIMIZED VERSION
+Version 5.0 - Sans BIP39, génération directe de clés privées
 
-Fonctionnalités:
-1. Génération de clés Bitcoin uniquement
-2. Vérification contre base de données SQLite
-3. Double logging: match d'adresse + balance confirmée
-4. Optimisé pour faible utilisation RAM (~50-100 MB)
+Optimisations:
+1. Génération directe de clés privées (sans BIP39 mnemonic)
+2. Utilisation de coincurve pour secp256k1 (10x plus rapide)
+3. Vérification contre base de données SQLite
+4. Double logging: match d'adresse + balance confirmée
+5. Utilisation RAM: ~50-100 MB
 
-Performance attendue: 100-300 keys/sec
+Performance attendue: 500-2000+ keys/sec (vs 100-300 avec BIP39)
 """
 
 import sys
@@ -24,9 +25,8 @@ import sqlite3
 from typing import List, Dict, Tuple, Optional
 from collections import deque
 
-from utils import (
-    generate_mnemonic,
-    derive_keys,
+from utils_optimized import (
+    derive_keys_optimized,
     check_btc_balance_async,
     RateLimiter,
     AddressCache,
@@ -41,7 +41,7 @@ TOTAL_KEYS_FILE = os.path.join(BASE_DIR, "total_keys_generator.json")
 DB_FILE = os.path.join(BASE_DIR, "bitcoin_addresses.db")
 
 # Optimization parameters
-BATCH_SIZE = 50          # Keys per batch (augmenté car BTC uniquement)
+BATCH_SIZE = 100         # Keys per batch (augmenté car plus rapide)
 BUFFER_SIZE = 100        # Log buffer size
 CACHE_SIZE = 10000       # Address cache size
 STATUS_INTERVAL = 30.0   # Status update interval (seconds)
@@ -154,7 +154,7 @@ def write_status(total_checked: int, btc_hits: int, btc_matches: int,
     total_global = total_start + total_checked
     
     data = {
-        "script": "btc_generator",
+        "script": "btc_generator_optimized",
         "keys_tested": total_checked,
         "total_keys_tested": total_global,
         "btc_hits": btc_hits,
@@ -174,14 +174,13 @@ def write_status(total_checked: int, btc_hits: int, btc_matches: int,
 
 
 def generate_key_batch(batch_size: int) -> List[Dict]:
-    """Generate a batch of BTC keys"""
+    """Generate a batch of BTC keys - OPTIMIZED VERSION"""
     batch = []
     for _ in range(batch_size):
         try:
-            mnemonic = generate_mnemonic()
-            keys = derive_keys(mnemonic)
+            # Génération directe sans BIP39 (beaucoup plus rapide)
+            keys = derive_keys_optimized()
             batch.append({
-                "mnemonic": mnemonic,
                 "btc_addr": keys["btc"]["address"],
                 "btc_priv": keys["btc"]["private_key"],
             })
@@ -215,8 +214,7 @@ async def process_batch(batch: List[Dict], session: aiohttp.ClientSession,
                 f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] "
                 f"BTC_ADDRESS_MATCH "
                 f"ADDR={key_data['btc_addr']} "
-                f"PRIV={key_data['btc_priv']} "
-                f"MNEMONIC=\"{key_data['mnemonic']}\"\n"
+                f"PRIV={key_data['btc_priv']}\n"
             )
             match_log_buffer.add(match_line)
             print(f"\n!!! ADRESSE BTC CONNUE TROUVÉE !!! {key_data['btc_addr']}\n", flush=True)
@@ -232,8 +230,7 @@ async def process_batch(batch: List[Dict], session: aiohttp.ClientSession,
                 line = (
                     f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] "
                     f"ASSET=BTC BALANCE={btc_balance:.8f} "
-                    f"ADDR={key_data['btc_addr']} PRIV={key_data['btc_priv']} "
-                    f"MNEMONIC=\"{key_data['mnemonic']}\"\n"
+                    f"ADDR={key_data['btc_addr']} PRIV={key_data['btc_priv']}\n"
                 )
                 log_buffer.add(line)
                 print(f"\n!!! FONDS BTC TROUVÉS !!! {btc_balance:.8f} BTC at {key_data['btc_addr']}\n", flush=True)
@@ -244,14 +241,23 @@ async def process_batch(batch: List[Dict], session: aiohttp.ClientSession,
 async def main_async():
     """Main async function"""
     print("\n" + "="*60, flush=True)
-    print("=== Bitcoin Address Checker v4.0 ===", flush=True)
+    print("=== Bitcoin Address Checker v5.0 OPTIMIZED ===", flush=True)
     print("="*60, flush=True)
-    print("\nFonctionnalités:", flush=True)
-    print("  • Génération de clés Bitcoin uniquement", flush=True)
+    print("\nOptimisations:", flush=True)
+    print("  • Génération DIRECTE de clés (sans BIP39)", flush=True)
+    print("  • Utilisation de coincurve pour secp256k1", flush=True)
     print("  • Vérification contre base de données SQLite", flush=True)
     print("  • Double logging: match + balance confirmée", flush=True)
     print("  • Utilisation RAM: ~50-100 MB", flush=True)
-    print(f"\nPerformance attendue: 100-300 keys/sec\n", flush=True)
+    print(f"\nPerformance attendue: 500-2000+ keys/sec\n", flush=True)
+    
+    # Vérifier les dépendances
+    try:
+        import coincurve
+        print("[Info] ✓ coincurve détecté (performance optimale)", flush=True)
+    except ImportError:
+        print("[Warning] coincurve non installé, utilisation de ecdsa (plus lent)", flush=True)
+        print("[Info] Pour installer: pip install coincurve", flush=True)
     
     # Initialiser le vérificateur d'adresses Bitcoin
     print("[Info] Connexion à la base de données Bitcoin...", flush=True)
@@ -351,7 +357,7 @@ async def main_async():
                     last_status_time = now
                 
                 # Small sleep to prevent CPU overload
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.001)  # Réduit car plus rapide
     
     except KeyboardInterrupt:
         print("\n\nCtrl+C reçu, arrêt en cours...", flush=True)

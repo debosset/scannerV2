@@ -1,10 +1,11 @@
 import time
 import asyncio
 import aiohttp
+import secrets
+import hashlib
 from typing import Optional
 from collections import deque
 from threading import Lock
-from mnemonic import Mnemonic
 from datetime import datetime
 
 
@@ -80,53 +81,177 @@ def log_funds_found(address: str, private_key: str, balance: float, currency: st
         log_file.write(log_entry)
 
 
-def generate_mnemonic() -> str:
-    """Generate a secure 24-word BIP39 mnemonic"""
-    mnemo = Mnemonic("english")
-    return mnemo.generate(strength=256)
+# ============================================================================
+# OPTIMIZED KEY GENERATION - NO BIP39 DEPENDENCY
+# ============================================================================
+
+# Base58 alphabet for Bitcoin addresses
+BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 
 
-def derive_keys(mnemonic: str) -> dict:
+def base58_encode(data: bytes) -> str:
+    """Encode bytes to Base58"""
+    # Convert bytes to integer
+    num = int.from_bytes(data, 'big')
+    
+    # Convert to base58
+    encoded = ''
+    while num > 0:
+        num, remainder = divmod(num, 58)
+        encoded = BASE58_ALPHABET[remainder] + encoded
+    
+    # Add leading '1's for leading zero bytes
+    for byte in data:
+        if byte == 0:
+            encoded = '1' + encoded
+        else:
+            break
+    
+    return encoded
+
+
+def hash160(data: bytes) -> bytes:
+    """SHA-256 followed by RIPEMD-160"""
+    sha256_hash = hashlib.sha256(data).digest()
+    ripemd160 = hashlib.new('ripemd160')
+    ripemd160.update(sha256_hash)
+    return ripemd160.digest()
+
+
+def double_sha256(data: bytes) -> bytes:
+    """Double SHA-256 hash"""
+    return hashlib.sha256(hashlib.sha256(data).digest()).digest()
+
+
+def private_key_to_wif(private_key_bytes: bytes, compressed: bool = True) -> str:
     """
-    Derive BTC keys from mnemonic - ETH removed.
+    Convert private key bytes to WIF (Wallet Import Format)
+    
+    Args:
+        private_key_bytes: 32-byte private key
+        compressed: Whether to use compressed format
+    
+    Returns:
+        WIF-encoded private key string
+    """
+    # Mainnet prefix
+    extended = b'\x80' + private_key_bytes
+    
+    # Add compression flag if needed
+    if compressed:
+        extended += b'\x01'
+    
+    # Calculate checksum
+    checksum = double_sha256(extended)[:4]
+    
+    # Encode to Base58
+    return base58_encode(extended + checksum)
+
+
+def private_key_to_public_key(private_key_bytes: bytes) -> bytes:
+    """
+    Convert private key to compressed public key using secp256k1
+    
+    Args:
+        private_key_bytes: 32-byte private key
+    
+    Returns:
+        33-byte compressed public key
+    """
+    try:
+        import coincurve
+        # Use coincurve for fast secp256k1 operations
+        privkey = coincurve.PrivateKey(private_key_bytes)
+        return privkey.public_key.format(compressed=True)
+    except ImportError:
+        # Fallback to ecdsa if coincurve not available
+        from ecdsa import SigningKey, SECP256k1
+        sk = SigningKey.from_string(private_key_bytes, curve=SECP256k1)
+        vk = sk.get_verifying_key()
+        
+        # Get uncompressed public key
+        public_key_bytes = b'\x04' + vk.to_string()
+        
+        # Convert to compressed format
+        x = int.from_bytes(vk.to_string()[:32], 'big')
+        y = int.from_bytes(vk.to_string()[32:], 'big')
+        
+        # Compressed format: 0x02 if y is even, 0x03 if y is odd
+        prefix = b'\x02' if y % 2 == 0 else b'\x03'
+        return prefix + x.to_bytes(32, 'big')
+
+
+def public_key_to_address(public_key: bytes) -> str:
+    """
+    Convert public key to Bitcoin P2PKH address
+    
+    Args:
+        public_key: Compressed or uncompressed public key
+    
+    Returns:
+        Bitcoin address string
+    """
+    # Hash160 of public key
+    hash160_result = hash160(public_key)
+    
+    # Add version byte (0x00 for mainnet P2PKH)
+    versioned = b'\x00' + hash160_result
+    
+    # Calculate checksum
+    checksum = double_sha256(versioned)[:4]
+    
+    # Encode to Base58
+    return base58_encode(versioned + checksum)
+
+
+def generate_random_private_key() -> bytes:
+    """
+    Generate a cryptographically secure random 32-byte private key
+    
+    Returns:
+        32-byte private key
+    """
+    # Generate random 32 bytes using secrets module (cryptographically secure)
+    while True:
+        private_key = secrets.token_bytes(32)
+        
+        # Ensure the private key is within valid range for secp256k1
+        # Must be between 1 and n-1 where n is the curve order
+        # n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+        key_int = int.from_bytes(private_key, 'big')
+        
+        if 1 <= key_int < 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141:
+            return private_key
+
+
+def derive_keys_optimized() -> dict:
+    """
+    Generate Bitcoin keys WITHOUT BIP39 mnemonic
+    This is MUCH faster than BIP39 derivation
+    
     Returns:
         {
             'btc': {'address': str, 'private_key': str}
         }
     """
-    try:
-        from hdwallet import HDWallet
-        from hdwallet.mnemonics import BIP39Mnemonic
-        from hdwallet.cryptocurrencies import Bitcoin
-        from hdwallet.hds import BIP44HD
-        from hdwallet.derivations import BIP44Derivation
-        
-        # Derive Bitcoin
-        btc_wallet = HDWallet(
-            cryptocurrency=Bitcoin,
-            hd=BIP44HD,
-            network=Bitcoin.NETWORKS.MAINNET
-        )
-        btc_wallet.from_mnemonic(
-            mnemonic=BIP39Mnemonic(mnemonic=mnemonic)
-        ).from_derivation(
-            derivation=BIP44Derivation(
-                coin_type=Bitcoin.COIN_TYPE,
-                account=0,
-                change=0,
-                address=0
-            )
-        )
-        btc_address = btc_wallet.address()
-        btc_private_key = btc_wallet.private_key()
-        
-        return {
-            'btc': {'address': btc_address, 'private_key': btc_private_key}
-        }
+    # Generate random private key (32 bytes)
+    private_key_bytes = generate_random_private_key()
     
-    except Exception as e:
-        print(f"Error in key derivation: {str(e)}")
-        raise
+    # Convert to WIF format
+    private_key_wif = private_key_to_wif(private_key_bytes, compressed=True)
+    
+    # Derive public key
+    public_key = private_key_to_public_key(private_key_bytes)
+    
+    # Derive Bitcoin address
+    btc_address = public_key_to_address(public_key)
+    
+    return {
+        'btc': {
+            'address': btc_address,
+            'private_key': private_key_wif
+        }
+    }
 
 
 async def check_btc_balance_async(
@@ -185,7 +310,7 @@ async def check_btc_balance_async(
 
 
 def check_btc_balance(address: str, private_key: str, rate_limiter: RateLimiter) -> Optional[float]:
-    """Synchronous BTC balance check (ETH removed)"""
+    """Synchronous BTC balance check"""
     import requests
     from config import BLOCKCHAIN_API_ENDPOINT, MAX_RETRIES, RETRY_DELAY
     
