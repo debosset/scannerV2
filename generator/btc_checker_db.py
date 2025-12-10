@@ -25,7 +25,7 @@ import sqlite3
 from typing import List, Dict, Tuple, Optional
 from collections import deque
 
-from utils_optimized import (
+from utils import (
     derive_keys_optimized,
     check_btc_balance_async,
     RateLimiter,
