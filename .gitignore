@@ -1,0 +1,52 @@
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# --- Environnements virtuels ---
+venv/
+venv_scanner/
+env/
+.venv/
+
+# --- Fichiers système ---
+.DS_Store
+Thumbs.db
+
+# --- Fichiers temporaires ---
+*.tmp
+
+# --- Projet scannerV2 ---
+
+# Status runtime (ne doit jamais être commit)
+generator/status.json
+generator/total_keys_generator.json
+
+# Logs générés par le scanner
+generator/found_funds.log
+generator/address_matches.log
+
+# Fichiers générés à grande fréquence
+generator/*.log
+dashboard/*.log
+
+# Base de données Bitcoin (trop lourde, jamais commit)
+generator/bitcoin_addresses.db
+bitcoin_addresses.db
+
+# Cache ou fichiers backend
+generator/*.db
+*.db
+
+# Process pid, cache python
+*.pid
+*.cache
+
+# --- Si tu veux ignorer tout ce qui est généré dans /generator sauf le code ---
+# /generator/*.json
+# /generator/*.dat
+
+# --- Systemd service (tu peux ignorer si tu l'as copié dans le repo) ---
+*.service
