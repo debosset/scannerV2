@@ -25,44 +25,15 @@ import sqlite3
 from typing import List, Dict, Tuple, Optional
 from collections import deque
 
-# Supposons que ces imports proviennent de vos fichiers utilitaires et config
-# Si vous n'avez pas ces fichiers, le script ne fonctionnera pas sans eux.
-# from utils import (
-#     derive_keys_optimized,
-#     check_btc_balance_async,
-#     RateLimiter,
-#     AddressCache,
-# )
-# from config import API_RATE_LIMIT
-
-# Placeholders pour un script autonome (À ADAPTER SI VOS FICHIERS EXISTENT)
-# --- START PLACEHOLDERS ---
-class RateLimiter:
-    def __init__(self, limit):
-        self.limit = limit
-    async def wait_for_slot(self):
-        await asyncio.sleep(0.01)
-
-class AddressCache:
-    def __init__(self, size):
-        pass
-
-def derive_keys_optimized():
-    # Placeholder: doit générer une clé privée (WIF) et l'adresse BTC correspondante
-    import random
-    import hashlib
-    import base58
-    # Ceci est un placeholder, utilisez votre véritable `derive_keys_optimized` !
-    pk_hex = os.urandom(32).hex()
-    addr = f"1PlaceholderAddr{pk_hex[:4]}" # Fausse adresse pour le test
-    return {"btc": {"address": addr, "private_key": pk_hex}}
-
-async def check_btc_balance_async(session, addr, priv_key, rate_limiter, cache):
-    await rate_limiter.wait_for_slot()
-    return 0.0 # Toujours 0 pour le placeholder
-
-API_RATE_LIMIT = 5 # Placeholder
-# --- END PLACEHOLDERS ---
+# --- IMPORTS CRITIQUES (DOIVENT EXISTER DANS VOS FICHIERS LOCAUX) ---
+from utils import (
+    derive_keys_optimized,  # <-- Votre fonction réelle de génération de clés
+    check_btc_balance_async,
+    RateLimiter,
+    AddressCache,
+)
+from config import API_RATE_LIMIT  # <-- Votre limite d'API configurée
+# -------------------------------------------------------------------
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_PATH = os.path.join(BASE_DIR, "found_funds.log")
@@ -89,13 +60,11 @@ class BTCAddressChecker:
     def connect(self):
         """Établit la connexion à la base de données"""
         if not os.path.exists(self.db_path):
-            # Laisse passer pour le test si btc_db_importer.py n'est pas utilisé
-            print(f"[Avertissement] Base de données non trouvée: {self.db_path}. Les vérifications de match ne fonctionneront pas.", flush=True)
-            return 
-            # raise FileNotFoundError(
-            #     f"Base de données non trouvée: {self.db_path}\n"
-            #     f"Veuillez d'abord exécuter: python btc_db_importer.py"
-            # )
+            # Le script continuera d'exécuter la partie génération/check balance
+            raise FileNotFoundError(
+                f"Base de données non trouvée: {self.db_path}\n"
+                f"Veuillez d'abord exécuter: python btc_db_importer.py"
+            )
         
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.cursor = self.conn.cursor()
@@ -195,7 +164,7 @@ def write_status(total_checked: int, btc_hits: int, btc_matches: int,
     
     tmp_path = STATUS_PATH + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4) # Ajout de indent=4 pour lisibilité
+        json.dump(data, f, indent=4)
     os.replace(tmp_path, STATUS_PATH)
     
     save_total_keys(total_global)
@@ -206,8 +175,8 @@ def generate_key_batch(batch_size: int) -> List[Dict]:
     batch = []
     for _ in range(batch_size):
         try:
-            # Génération directe sans BIP39 (beaucoup plus rapide)
-            keys = derive_keys_optimized()
+            # Appel à votre fonction réelle (issue de utils.py)
+            keys = derive_keys_optimized() 
             batch.append({
                 "btc_addr": keys["btc"]["address"],
                 "btc_priv": keys["btc"]["private_key"],
@@ -324,12 +293,12 @@ async def main_async():
     start_time = time.time()
     last_status_time = 0.0
     
-    # Initialisation corrigée : utiliser un indicateur au lieu d'une chaîne vide
-    last_btc_addr = "N/A - Initialisation" 
+    # CORRECTION #1: Utiliser une valeur par défaut informative au lieu de ""
+    last_btc_addr = "N/A - Attente premier lot" 
     
     try:
         async with aiohttp.ClientSession() as session:
-            first_batch_processed = False # Indicateur pour la correction
+            first_batch_processed = False # Indicateur pour forcer la première écriture de statut
             
             while True:
                 # Generate batch of keys
@@ -351,13 +320,13 @@ async def main_async():
                 btc_matches += batch_btc_matches
                 
                 # Update last address
-                # Cette ligne est essentielle pour que le statut soit correct
+                # Cette ligne est critique et mise à jour à chaque lot généré avec succès.
                 last_btc_addr = batch[-1]["btc_addr"]
                 
                 now = time.time()
                 need_status = False
                 
-                # Correction 1 : Forcer l'écriture du statut après le premier lot
+                # CORRECTION #2 : Forcer l'écriture du statut après le premier lot
                 if not first_batch_processed:
                     need_status = True
                     first_batch_processed = True
@@ -395,18 +364,18 @@ async def main_async():
                     last_status_time = now
                 
                 # Small sleep to prevent CPU overload
-                await asyncio.sleep(0.001)  # Réduit car plus rapide
+                await asyncio.sleep(0.001) 
     
     except KeyboardInterrupt:
         print("\n\nCtrl+C reçu, arrêt en cours...", flush=True)
         log_buffer.flush()
         match_log_buffer.flush()
-        # Correction 2 : Assurer que write_status est appelé avec la dernière valeur connue
+        # Assure la sauvegarde finale avec la dernière adresse connue
         write_status(
             total_checked,
             btc_hits,
             btc_matches,
-            last_btc_addr, # Utilise la dernière adresse mise à jour avant l'interruption
+            last_btc_addr,
             start_time,
             total_start,
         )
