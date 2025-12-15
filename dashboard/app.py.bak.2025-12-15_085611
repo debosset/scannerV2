@@ -483,6 +483,21 @@ def get_system_status():
                         break
 
             return {"last_line": last_line, "import_duration": duration}
+      if not m:
+        m = re.search(r"Import terminé: .* en ([0-9]+) min", l)
+      if m:
+        duration = f"{m.group(1)} min"
+        break
+
+    # Fallback: search for Download or ANALYZE/VACUUM duration lines
+    if duration is None:
+      for l in reversed(lines):
+        m = re.search(r"Download OK: .* en ([0-9]+\.[0-9])s", l)
+        if m:
+          duration = f"download {m.group(1)}s"
+          break
+
+    return {"last_line": last_line, "import_duration": duration}
 
 @app.route("/")
 def index():
