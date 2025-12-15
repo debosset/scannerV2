@@ -483,34 +483,46 @@ def get_random_addresses(limit=10):
 
     try:
         conn = sqlite3.connect(GEN_DB)
+        cur = conn.cursor()
+
         table = _detect_address_table(conn)
         if not table:
             conn.close()
             return {"items": [], "error": "Aucune table avec colonne 'address' détectée."}
 
-        cur = conn.cursor()
-        cur.execute(f"SELECT max(rowid) FROM {table};")
-        max_id = cur.fetchone()[0] or 0
-        if max_id <= 0:
+        # Nombre total de lignes
+        cur.execute(f"SELECT COUNT(*) FROM {table};")
+        total = cur.fetchone()[0]
+
+        if total <= 0:
             conn.close()
             return {"items": []}
 
         items = []
-        seen = set()
+        seen_offsets = set()
         attempts = 0
-        while len(items) < limit and attempts < limit * 12:
+
+        while len(items) < limit and attempts < limit * 10:
             attempts += 1
-            rid = random.randint(1, int(max_id))
-            cur.execute(f"SELECT address FROM {table} WHERE rowid >= ? LIMIT 1;", (rid,))
+            offset = random.randint(0, total - 1)
+            if offset in seen_offsets:
+                continue
+            seen_offsets.add(offset)
+
+            cur.execute(
+                f"SELECT address FROM {table} LIMIT 1 OFFSET ?;",
+                (offset,)
+            )
             row = cur.fetchone()
-            if row and row[0] and row[0] not in seen:
-                seen.add(row[0])
+            if row and row[0]:
                 items.append(row[0])
 
         conn.close()
         return {"items": items, "table": table}
+
     except Exception as e:
         return {"items": [], "error": str(e)}
+
 
 
 # ============================================================
