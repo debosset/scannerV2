@@ -204,6 +204,73 @@ def public_key_to_address(public_key: bytes) -> str:
     return base58_encode(versioned + checksum)
 
 
+def bech32_polymod(values):
+    GEN = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3]
+    chk = 1
+    for v in values:
+        top = chk >> 25
+        chk = ((chk & 0x1ffffff) << 5) ^ v
+        for i in range(5):
+            if (top >> i) & 1:
+                chk ^= GEN[i]
+    return chk
+
+
+def bech32_hrp_expand(hrp):
+    return [ord(x) >> 5 for x in hrp] + [0] + [ord(x) & 31 for x in hrp]
+
+
+def bech32_create_checksum(hrp, data):
+    values = bech32_hrp_expand(hrp) + data
+    polymod = bech32_polymod(values + [0, 0, 0, 0, 0, 0]) ^ 1
+    return [(polymod >> 5 * (5 - i)) & 31 for i in range(6)]
+
+
+BECH32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'
+
+
+def bech32_encode(hrp, data):
+    combined = data + bech32_create_checksum(hrp, data)
+    return hrp + '1' + ''.join([BECH32_CHARSET[d] for d in combined])
+
+
+def convertbits(data, frombits, tobits, pad=True):
+    acc = 0
+    bits = 0
+    ret = []
+    maxv = (1 << tobits) - 1
+    for value in data:
+        acc = (acc << frombits) | value
+        bits += frombits
+        while bits >= tobits:
+            bits -= tobits
+            ret.append((acc >> bits) & maxv)
+    if pad:
+        if bits:
+            ret.append((acc << (tobits - bits)) & maxv)
+    elif bits >= frombits or ((acc << (tobits - bits)) & maxv):
+        return None
+    return ret
+
+
+def public_key_to_bech32(public_key: bytes, hrp: str = 'bc') -> str:
+    """Convert pubkey to native segwit P2WPKH bech32 address (bc1...)."""
+    prog = hash160(public_key)
+    # witness version 0
+    data = [0] + convertbits(prog, 8, 5)
+    return bech32_encode(hrp, data)
+
+
+def public_key_to_p2sh_p2wpkh(public_key: bytes) -> str:
+    """Convert pubkey to P2SH-wrapped P2WPKH address (starts with 3)."""
+    # redeemScript = 0x00 0x14 <hash160(pubkey)>
+    redeem = b'\x00\x14' + hash160(public_key)
+    redeem_hashed = hash160(redeem)
+    versioned = b'\x05' + redeem_hashed
+    checksum = double_sha256(versioned)[:4]
+    return base58_encode(versioned + checksum)
+
+
 def generate_random_private_key() -> bytes:
     """
     Generate a cryptographically secure random 32-byte private key
@@ -243,12 +310,18 @@ def derive_keys_optimized() -> dict:
     # Derive public key
     public_key = private_key_to_public_key(private_key_bytes)
     
-    # Derive Bitcoin address
-    btc_address = public_key_to_address(public_key)
-    
+    # Derive Bitcoin address (legacy P2PKH)
+    p2pkh = public_key_to_address(public_key)
+    # P2SH-wrapped segwit (starts with 3)
+    p2sh = public_key_to_p2sh_p2wpkh(public_key)
+    # Native segwit bech32 (bc1...)
+    bech32 = public_key_to_bech32(public_key)
+
     return {
         'btc': {
-            'address': btc_address,
+            'p2pkh': p2pkh,
+            'p2sh': p2sh,
+            'bech32': bech32,
             'private_key': private_key_wif
         }
     }

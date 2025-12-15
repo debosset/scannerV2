@@ -286,18 +286,33 @@ def load_generator_status():
     speed = float(data.get("speed_keys_per_sec", 0.0))
     elapsed = float(data.get("elapsed_seconds", 0.0))
 
+    # Support new multi-format last address field `last_btc_addresses`
+    last_addrs = data.get("last_btc_addresses")
+    if isinstance(last_addrs, dict):
+      # Build a compact multi-line display for the dashboard
+      display = []
+      if last_addrs.get('p2pkh'):
+        display.append(f"P2PKH: {last_addrs.get('p2pkh')}")
+      if last_addrs.get('p2sh'):
+        display.append(f"P2SH: {last_addrs.get('p2sh')}")
+      if last_addrs.get('bech32'):
+        display.append(f"Bech32: {last_addrs.get('bech32')}")
+      last_addr_display = "\n".join(display) if display else data.get("last_btc_address", "")
+    else:
+      last_addr_display = data.get("last_btc_address", "")
+
     return {
-        "keys_tested": int(data.get("keys_tested", 0)),
-        "total_keys_tested": int(data.get("total_keys_tested", 0)),
-        "btc_hits": int(data.get("btc_hits", 0)),
-        "btc_address_matches": int(data.get("btc_address_matches", 0)),
-        "last_btc_address": data.get("last_btc_address", ""),
-        "speed_keys_per_sec": speed,
-        "elapsed_seconds": elapsed,
-        "elapsed_human": human_readable_time(elapsed),
-        "last_update": data.get("last_update", "-"),
-        "keys_per_minute": speed * 60,
-        "keys_per_day": speed * 86400,
+      "keys_tested": int(data.get("keys_tested", 0)),
+      "total_keys_tested": int(data.get("total_keys_tested", 0)),
+      "btc_hits": int(data.get("btc_hits", 0)),
+      "btc_address_matches": int(data.get("btc_address_matches", 0)),
+      "last_btc_address": last_addr_display,
+      "speed_keys_per_sec": speed,
+      "elapsed_seconds": elapsed,
+      "elapsed_human": human_readable_time(elapsed),
+      "last_update": data.get("last_update", "-"),
+      "keys_per_minute": speed * 60,
+      "keys_per_day": speed * 86400,
     }
 
 def get_system_status():

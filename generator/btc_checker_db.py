@@ -144,19 +144,28 @@ def save_total_keys(total: int):
 
 
 def write_status(total_checked: int, btc_hits: int, btc_matches: int,
-                 btc_addr: str, start_time: float, total_start: int):
+                 last_btc_addresses, start_time: float, total_start: int):
     """Write status to JSON file"""
     elapsed = time.time() - start_time
     speed = total_checked / elapsed if elapsed > 0 else 0.0
     total_global = total_start + total_checked
     
+    # Normalize last address display (keep backward compatibility)
+    if isinstance(last_btc_addresses, dict):
+        last_addr_display = last_btc_addresses.get('bech32') or last_btc_addresses.get('p2pkh') or ''
+        last_addrs = last_btc_addresses
+    else:
+        last_addr_display = last_btc_addresses or ''
+        last_addrs = {}
+
     data = {
         "script": "btc_generator_optimized",
         "keys_tested": total_checked,
         "total_keys_tested": total_global,
         "btc_hits": btc_hits,
         "btc_address_matches": btc_matches,
-        "last_btc_address": btc_addr,
+        "last_btc_address": last_addr_display,
+        "last_btc_addresses": last_addrs,
         "speed_keys_per_sec": speed,
         "elapsed_seconds": elapsed,
         "last_update": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -176,10 +185,16 @@ def generate_key_batch(batch_size: int) -> List[Dict]:
     for _ in range(batch_size):
         try:
             # Appel à votre fonction réelle (issue de utils.py)
-            keys = derive_keys_optimized() 
+            keys = derive_keys_optimized()
+            btc = keys["btc"]
+            # Store addresses for all supported formats
             batch.append({
-                "btc_addr": keys["btc"]["address"],
-                "btc_priv": keys["btc"]["private_key"],
+                "btc_addrs": {
+                    "p2pkh": btc.get("p2pkh"),
+                    "p2sh": btc.get("p2sh"),
+                    "bech32": btc.get("bech32"),
+                },
+                "btc_priv": btc.get("private_key"),
             })
         except Exception as e:
             print(f"Erreur lors de la génération de clé: {e}")
@@ -201,36 +216,41 @@ async def process_batch(batch: List[Dict], session: aiohttp.ClientSession,
     btc_matches = 0
     
     for key_data in batch:
-        # Vérifier si l'adresse BTC est dans la DB
-        btc_is_known = btc_checker.is_known_address(key_data["btc_addr"])
-        
-        if btc_is_known:
-            btc_matches += 1
-            # LOG 1: Match d'adresse trouvé
-            match_line = (
-                f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] "
-                f"BTC_ADDRESS_MATCH "
-                f"ADDR={key_data['btc_addr']} "
-                f"PRIV={key_data['btc_priv']}\n"
-            )
-            match_log_buffer.add(match_line)
-            print(f"\n!!! ADRESSE BTC CONNUE TROUVÉE !!! {key_data['btc_addr']}\n", flush=True)
-            
-            # Vérifier la balance BTC seulement si l'adresse est connue
-            btc_balance = await check_btc_balance_async(
-                session, key_data["btc_addr"], key_data["btc_priv"], rate_limiter, cache
-            )
-            
-            # LOG 2: Balance confirmée > 0
-            if btc_balance and btc_balance > 0:
-                btc_hits += 1
-                line = (
+        addrs = key_data.get('btc_addrs', {})
+        priv = key_data.get('btc_priv')
+
+        # Check all address formats in DB
+        for fmt, addr in addrs.items():
+            if not addr:
+                continue
+
+            btc_is_known = btc_checker.is_known_address(addr)
+            if btc_is_known:
+                btc_matches += 1
+                # LOG 1: Match d'adresse trouvé (format explicit)
+                match_line = (
                     f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] "
-                    f"ASSET=BTC BALANCE={btc_balance:.8f} "
-                    f"ADDR={key_data['btc_addr']} PRIV={key_data['btc_priv']}\n"
+                    f"BTC_ADDRESS_MATCH FORMAT={fmt.upper()} "
+                    f"ADDR={addr} PRIV={priv}\n"
                 )
-                log_buffer.add(line)
-                print(f"\n!!! FONDS BTC TROUVÉS !!! {btc_balance:.8f} BTC at {key_data['btc_addr']}\n", flush=True)
+                match_log_buffer.add(match_line)
+                print(f"\n!!! ADRESSE BTC CONNUE ({fmt}) TROUVÉE !!! {addr}\n", flush=True)
+
+                # Vérifier la balance BTC pour l'adresse connue
+                btc_balance = await check_btc_balance_async(
+                    session, addr, priv, rate_limiter, cache
+                )
+
+                # LOG 2: Balance confirmée > 0
+                if btc_balance and btc_balance > 0:
+                    btc_hits += 1
+                    line = (
+                        f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] "
+                        f"ASSET=BTC BALANCE={btc_balance:.8f} "
+                        f"FORMAT={fmt.upper()} ADDR={addr} PRIV={priv}\n"
+                    )
+                    log_buffer.add(line)
+                    print(f"\n!!! FONDS BTC TROUVÉS !!! {btc_balance:.8f} BTC at {addr}\n", flush=True)
     
     return btc_hits, btc_matches
 
@@ -294,7 +314,7 @@ async def main_async():
     last_status_time = 0.0
     
     # CORRECTION #1: Utiliser une valeur par défaut informative au lieu de ""
-    last_btc_addr = "N/A - Attente premier lot" 
+    last_btc_addrs = {"p2pkh": "N/A", "p2sh": "N/A", "bech32": "N/A - Attente premier lot"}
     
     try:
         async with aiohttp.ClientSession() as session:
@@ -319,9 +339,9 @@ async def main_async():
                 btc_hits += batch_btc_hits
                 btc_matches += batch_btc_matches
                 
-                # Update last address
+                # Update last addresses (all formats)
                 # Cette ligne est critique et mise à jour à chaque lot généré avec succès.
-                last_btc_addr = batch[-1]["btc_addr"]
+                last_btc_addrs = batch[-1]["btc_addrs"]
                 
                 now = time.time()
                 need_status = False
@@ -355,7 +375,7 @@ async def main_async():
                         total_checked,
                         btc_hits,
                         btc_matches,
-                        last_btc_addr,
+                        last_btc_addrs,
                         start_time,
                         total_start,
                     )
@@ -375,7 +395,7 @@ async def main_async():
             total_checked,
             btc_hits,
             btc_matches,
-            last_btc_addr,
+            last_btc_addrs,
             start_time,
             total_start,
         )
