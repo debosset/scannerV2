@@ -2,6 +2,7 @@ from flask import Flask, jsonify, render_template_string
 import json
 import os
 import time
+from decimal import Decimal, getcontext
 
 try:
     import psutil
@@ -15,11 +16,16 @@ app = Flask(__name__)
 # ─────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PARENT_DIR = os.path.dirname(BASE_DIR)
-
 GEN_STATUS = os.path.join(PARENT_DIR, "generator", "status.json")
 
+# secp256k1 curve order (keyspace size)
+SECP256K1_N_INT = int("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16)
+
+# How many decimals to show for percent. (Big -> long 0.0000... output)
+PERCENT_DECIMALS = 70
+
 # ─────────────────────────────────────────────────────────────
-# Template (design conservé)
+# Template (design)
 # ─────────────────────────────────────────────────────────────
 TEMPLATE = """
 <!doctype html>
@@ -62,8 +68,10 @@ TEMPLATE = """
       background: #020617;
       border-radius: .75rem;
       border: 1px solid rgba(30,64,175,.6);
-      font-size: .7rem;
-      white-space: pre-wrap;
+      font-size: .72rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .sys-label {
       font-size: .7rem;
@@ -81,28 +89,37 @@ TEMPLATE = """
         const g = d.generator || {};
         const s = d.system || {};
 
+        // Counters
         document.getElementById('keys_session').textContent =
           (g.keys_tested || 0).toLocaleString('fr-CH');
         document.getElementById('keys_total').textContent =
           (g.total_keys_tested || 0).toLocaleString('fr-CH');
 
+        // Speed
         document.getElementById('speed_sec').textContent =
-          (g.speed_keys_per_sec || 0).toFixed(2);
+          (Number(g.speed_keys_per_sec || 0)).toFixed(2);
         document.getElementById('speed_min').textContent =
-          Math.round(g.keys_per_minute || 0).toLocaleString('fr-CH');
+          Math.round(Number(g.keys_per_minute || 0)).toLocaleString('fr-CH');
         document.getElementById('speed_day').textContent =
-          Math.round(g.keys_per_day || 0).toLocaleString('fr-CH');
+          Math.round(Number(g.keys_per_day || 0)).toLocaleString('fr-CH');
 
+        // Hits / matches
         document.getElementById('btc_hits').textContent = g.btc_hits || 0;
         document.getElementById('btc_matches').textContent = g.btc_address_matches || 0;
+
+        // Uptime
         document.getElementById('elapsed').textContent = g.elapsed_human || '-';
-        document.getElementById('last_addr').textContent = g.last_btc_address || '-';
 
-        document.getElementById('tested_vs_total').textContent =
-          `${(g.total_keys_tested||0).toLocaleString('fr-CH')} / ${g.total_keyspace_str || '-'}`;
-        document.getElementById('percent_tested').textContent =
-          g.percent_tested_str || '-';
+        // Percent (very long decimal string)
+        document.getElementById('percent_tested').textContent = g.percent_tested_str || '-';
 
+        // Last addresses (3 separate fields)
+        const addrs = g.last_btc_addresses || {};
+        document.getElementById('last_p2pkh').textContent = addrs.p2pkh || '-';
+        document.getElementById('last_p2sh').textContent  = addrs.p2sh  || '-';
+        document.getElementById('last_bech32').textContent = addrs.bech32 || '-';
+
+        // System
         document.getElementById('cpu').textContent = s.cpu_text || '-';
         document.getElementById('ram').textContent = s.ram_text || '-';
 
@@ -120,76 +137,108 @@ TEMPLATE = """
 
 <body class="min-h-screen">
   <div class="max-w-6xl mx-auto px-4 py-8">
-    <h1 class="text-2xl md:text-3xl font-semibold mb-6">
+
+    <h1 class="text-2xl md:text-3xl font-semibold tracking-tight mb-6">
       <span class="text-slate-200">Scanner</span>
       <span class="text-slate-500"> · Monitor</span>
     </h1>
 
-    <div class="glass p-6 space-y-6">
+    <div class="glass p-5 md:p-6 space-y-6">
 
+      <!-- Ligne 1 -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div class="metric-card p-4">
-          <div class="metric-label">Clés session</div>
+          <div class="metric-label mb-1">Clés testées · session</div>
           <div class="metric-main text-emerald-400" id="keys_session">-</div>
         </div>
+
         <div class="metric-card p-4">
-          <div class="metric-label">Clés total</div>
+          <div class="metric-label mb-1">Clés testées · total</div>
           <div class="metric-main text-sky-400" id="keys_total">-</div>
         </div>
+
         <div class="metric-card p-4">
-          <div class="metric-label">Uptime</div>
-          <div class="metric-main" id="elapsed">-</div>
+          <div class="metric-label mb-1">Uptime · session</div>
+          <div class="metric-main text-slate-100" id="elapsed">-</div>
         </div>
       </div>
 
-      <div class="metric-card p-4">
-        <div class="metric-label">Pourcentage du keyspace testé</div>
-        <div class="metric-main text-indigo-300" id="percent_tested">-</div>
+      <!-- Pourcentage keyspace -->
+      <div class="grid grid-cols-1 gap-4 pt-2">
+        <div class="metric-card p-4">
+          <div class="metric-label mb-1">Pourcentage du keyspace testé</div>
+          <div class="mt-2 mono-box p-3 text-[12px] tracking-tight text-indigo-200 break-all" id="percent_tested">-</div>
+        </div>
       </div>
 
-      <div class="metric-card p-4">
-        <div class="metric-label">Clés testées / total keyspace</div>
-        <div class="mono-box p-3" id="tested_vs_total">-</div>
-      </div>
-
+      <!-- Ligne 2 : Vitesse -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div class="metric-card p-4">
-          <div class="metric-label">keys / sec</div>
-          <div class="metric-main text-indigo-400"><span id="speed_sec">-</span></div>
+          <div class="metric-label mb-1">Clés / seconde</div>
+          <div class="metric-main text-indigo-400">
+            <span id="speed_sec">-</span>
+            <span class="text-sm text-slate-500 ml-1">keys/s</span>
+          </div>
         </div>
+
         <div class="metric-card p-4">
-          <div class="metric-label">keys / min</div>
-          <div class="metric-main text-indigo-300"><span id="speed_min">-</span></div>
+          <div class="metric-label mb-1">Clés / minute</div>
+          <div class="metric-main text-indigo-300">
+            <span id="speed_min">-</span>
+            <span class="text-sm text-slate-500 ml-1">keys/min</span>
+          </div>
         </div>
+
         <div class="metric-card p-4">
-          <div class="metric-label">keys / jour</div>
-          <div class="metric-main text-indigo-200"><span id="speed_day">-</span></div>
+          <div class="metric-label mb-1">Clés / jour</div>
+          <div class="metric-main text-indigo-200">
+            <span id="speed_day">-</span>
+            <span class="text-sm text-slate-500 ml-1">keys/jour</span>
+          </div>
         </div>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <!-- Résultats -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="metric-card p-4">
-          <div class="metric-label">Match DB</div>
+          <div class="metric-label mb-1">Adresse DB</div>
           <div class="metric-main text-amber-300" id="btc_matches">-</div>
         </div>
+
         <div class="metric-card p-4">
-          <div class="metric-label">BTC trouvé</div>
+          <div class="metric-label mb-1">Adresse sold</div>
           <div class="metric-main text-emerald-300" id="btc_hits">-</div>
-        </div>
-        <div class="metric-card p-4">
-          <div class="metric-label">Dernière adresse</div>
-          <div class="mono-box p-3" id="last_addr">-</div>
         </div>
       </div>
 
+      <!-- Dernières adresses (3 champs séparés) -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+        <div class="metric-card p-4">
+          <div class="metric-label mb-1">Dernière adresse · P2PKH</div>
+          <div class="mono-box p-3 text-[11px] tracking-tight text-sky-200" id="last_p2pkh">-</div>
+        </div>
+
+        <div class="metric-card p-4">
+          <div class="metric-label mb-1">Dernière adresse · P2SH</div>
+          <div class="mono-box p-3 text-[11px] tracking-tight text-sky-200" id="last_p2sh">-</div>
+        </div>
+
+        <div class="metric-card p-4">
+          <div class="metric-label mb-1">Dernière adresse · Bech32</div>
+          <div class="mono-box p-3 text-[11px] tracking-tight text-sky-200" id="last_bech32">-</div>
+        </div>
+      </div>
+
+      <!-- Système -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-800/70">
         <div>
-          <div class="sys-label">CPU</div>
-          <div id="cpu">-</div>
+          <div class="sys-label mb-1">CPU</div>
+          <div class="text-sm font-medium text-slate-100" id="cpu">-</div>
         </div>
+
         <div>
-          <div class="sys-label">RAM</div>
-          <div id="ram">-</div>
+          <div class="sys-label mb-1">RAM</div>
+          <div class="text-sm font-medium text-slate-100" id="ram">-</div>
         </div>
       </div>
 
@@ -200,9 +249,9 @@ TEMPLATE = """
 """
 
 # ─────────────────────────────────────────────────────────────
-# Helpers
+# Backend helpers
 # ─────────────────────────────────────────────────────────────
-def human_readable_time(seconds):
+def human_readable_time(seconds: float) -> str:
     try:
         seconds = int(seconds)
     except Exception:
@@ -222,15 +271,33 @@ def default_status():
         "total_keys_tested": 0,
         "btc_hits": 0,
         "btc_address_matches": 0,
-        "last_btc_address": "",
         "speed_keys_per_sec": 0.0,
         "elapsed_seconds": 0.0,
         "elapsed_human": "-",
         "keys_per_minute": 0.0,
         "keys_per_day": 0.0,
-        "percent_tested_str": "0 %",
-        "total_keyspace_str": "-",
+        "percent_tested_str": "0." + ("0" * PERCENT_DECIMALS) + " %",
+        "last_btc_addresses": {"p2pkh": "", "p2sh": "", "bech32": ""},
     }
+
+
+def format_percent_ultra_decimal(total_tested: int) -> str:
+    """
+    Return percent as very long fixed-decimal string like:
+    0.000000000000...0035 %
+    """
+    # high precision so we can safely format many decimals
+    getcontext().prec = 200
+
+    if total_tested <= 0:
+        return "0." + ("0" * PERCENT_DECIMALS) + " %"
+
+    tested = Decimal(total_tested)
+    n = Decimal(SECP256K1_N_INT)
+
+    percent = (tested / n) * Decimal(100)
+    # fixed decimal with many places (keeps the long 0s)
+    return f"{percent:.{PERCENT_DECIMALS}f} %"
 
 
 def load_generator_status():
@@ -245,55 +312,52 @@ def load_generator_status():
 
     speed = float(data.get("speed_keys_per_sec", 0.0))
     elapsed = float(data.get("elapsed_seconds", 0.0))
+    total_tested = int(data.get("total_keys_tested", 0))
 
+    # last addresses (3 formats)
     last_addrs = data.get("last_btc_addresses")
     if isinstance(last_addrs, dict):
-        last_addr_display = "\n".join(
-            f"{k.upper()}: {v}" for k, v in last_addrs.items() if v
-        )
+        last_btc_addresses = {
+            "p2pkh": last_addrs.get("p2pkh") or "",
+            "p2sh": last_addrs.get("p2sh") or "",
+            "bech32": last_addrs.get("bech32") or "",
+        }
     else:
-        last_addr_display = data.get("last_btc_address", "")
-
-    from decimal import Decimal, getcontext
-    getcontext().prec = 80
-    SECP256K1_N = Decimal(int(
-        "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16
-    ))
-    tested = Decimal(int(data.get("total_keys_tested", 0)))
-
-    if tested > 0:
-        percent = (tested / SECP256K1_N) * Decimal(100)
-        percent_str = f"{percent:.2E} % (≈ 1 sur {(SECP256K1_N/tested):.2E})"
-    else:
-        percent_str = "0 % (≈ 1 sur ∞)"
+        # fallback: only one string exists
+        last_btc_addresses = {"p2pkh": data.get("last_btc_address", "") or "", "p2sh": "", "bech32": ""}
 
     return {
         "keys_tested": int(data.get("keys_tested", 0)),
-        "total_keys_tested": int(data.get("total_keys_tested", 0)),
+        "total_keys_tested": total_tested,
         "btc_hits": int(data.get("btc_hits", 0)),
         "btc_address_matches": int(data.get("btc_address_matches", 0)),
-        "last_btc_address": last_addr_display,
         "speed_keys_per_sec": speed,
         "elapsed_seconds": elapsed,
         "elapsed_human": human_readable_time(elapsed),
         "keys_per_minute": speed * 60,
         "keys_per_day": speed * 86400,
-        "percent_tested_str": percent_str,
-        "total_keyspace_str": format(SECP256K1_N, "0.2E"),
+        "percent_tested_str": format_percent_ultra_decimal(total_tested),
+        "last_btc_addresses": last_btc_addresses,
     }
 
 
 def get_system_status():
     if psutil is None:
         return {"cpu_text": "-", "ram_text": "-"}
-    cpu = psutil.cpu_percent(interval=0.1)
-    mem = psutil.virtual_memory()
-    return {
-        "cpu_text": f"{cpu:.1f} %",
-        "ram_text": f"{mem.used/1e9:.2f} / {mem.total/1e9:.2f} GB",
-    }
+
+    try:
+        cpu = psutil.cpu_percent(interval=0.1)
+        mem = psutil.virtual_memory()
+        return {
+            "cpu_text": f"{cpu:.1f} %",
+            "ram_text": f"{mem.used/1e9:.2f} / {mem.total/1e9:.2f} GB",
+        }
+    except Exception:
+        return {"cpu_text": "-", "ram_text": "-"}
 
 
+# ─────────────────────────────────────────────────────────────
+# Routes
 # ─────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
