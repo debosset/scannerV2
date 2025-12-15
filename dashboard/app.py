@@ -2,6 +2,8 @@ from flask import Flask, jsonify, render_template_string
 import json
 import os
 import time
+import sqlite3
+import re
 
 try:
     import psutil
@@ -16,6 +18,8 @@ PARENT_DIR = os.path.dirname(BASE_DIR)
 
 # Fichier de status généré par btc_checker_db.py
 GEN_STATUS = os.path.join(PARENT_DIR, "generator", "status.json")
+GEN_DB = os.path.join(PARENT_DIR, "generator", "bitcoin_addresses.db")
+IMPORTER_LOG = os.path.join(PARENT_DIR, "generator", "btc_db_importer.log")
 
 TEMPLATE = """
 <!doctype html>
@@ -124,7 +128,23 @@ TEMPLATE = """
           gen.elapsed_human || '-';
 
         document.getElementById('last_addr').textContent =
-          gen.last_btc_address || '-';
+              gen.last_btc_address || '-';
+
+        // Tested vs total keyspace
+        const tested = gen.total_keys_tested || 0;
+        const totalKeyspace = gen.total_keyspace_str || '-';
+        const testedSci = gen.total_tested_str || tested.toString();
+        document.getElementById('tested_vs_total').textContent = `${tested.toLocaleString('fr-CH')} / ${totalKeyspace} (${testedSci})`;
+        document.getElementById('percent_tested').textContent = gen.percent_tested_str || '-';
+
+            // Database info
+            const db = data.database || {};
+            document.getElementById('db_rows').textContent = db.rows != null ? db.rows.toLocaleString('fr-CH') : '-';
+            document.getElementById('db_mtime').textContent = db.last_modified || '-';
+            // Importer info
+            const imp = data.importer || {};
+            document.getElementById('import_duration').textContent = imp.import_duration || '-';
+            document.getElementById('import_last_line').textContent = imp.last_line || '-';
 
         document.getElementById('cpu').textContent =
           sys.cpu_text || '-';
@@ -172,6 +192,22 @@ TEMPLATE = """
           <div class="metric-main text-slate-100" id="elapsed">-</div>
         </div>
 
+      </div>
+
+      <!-- Percentage of keyspace tested -->
+      <div class="grid grid-cols-1 md:grid-cols-1 gap-4 pt-4">
+        <div class="metric-card p-4">
+          <div class="metric-label mb-1">Pourcentage clefs testées · total keyspace</div>
+          <div class="metric-main text-indigo-300" id="percent_tested">-</div>
+        </div>
+      </div>
+
+      <!-- Tested vs Total keyspace -->
+      <div class="grid grid-cols-1 md:grid-cols-1 gap-4 pt-2">
+        <div class="metric-card p-4">
+          <div class="metric-label mb-1">Clés testées · / · Total keyspace</div>
+          <div class="mt-2 mono-box p-3 text-[10px] tracking-tight text-sky-200 break-all" id="tested_vs_total">-</div>
+        </div>
       </div>
 
       <!-- Ligne 2 : Vitesse -->
@@ -222,6 +258,32 @@ TEMPLATE = """
         </div>
 
       </div>
+
+        <!-- DB status -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
+          <div class="metric-card p-4">
+            <div class="metric-label mb-1">DB · lignes (btc_addresses)</div>
+            <div class="metric-main text-amber-300" id="db_rows">-</div>
+          </div>
+
+          <div class="metric-card p-4">
+            <div class="metric-label mb-1">DB · dernière mise à jour</div>
+            <div class="mt-2 mono-box p-3 text-[10px] tracking-tight text-sky-200 break-all" id="db_mtime">-</div>
+          </div>
+        </div>
+
+        <!-- Importer status -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
+          <div class="metric-card p-4">
+            <div class="metric-label mb-1">Import · durée</div>
+            <div class="metric-main text-emerald-300" id="import_duration">-</div>
+          </div>
+
+          <div class="metric-card p-4">
+            <div class="metric-label mb-1">Import · dernier log</div>
+            <div class="mt-2 mono-box p-3 text-[10px] tracking-tight text-sky-200 break-all" id="import_last_line">-</div>
+          </div>
+        </div>
 
       <!-- Ligne 4 : Système -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-800/70">
@@ -301,9 +363,24 @@ def load_generator_status():
     else:
       last_addr_display = data.get("last_btc_address", "")
 
+    # Calculate percentage of keyspace tested (very small value)
+    from decimal import Decimal, getcontext
+
+    # secp256k1 curve order (number of private keys)
+    SECP256K1_N = int("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", 16)
+
+    total_tested = int(data.get("total_keys_tested", 0))
+    getcontext().prec = 50
+    try:
+      percent = (Decimal(total_tested) / Decimal(SECP256K1_N)) * Decimal(100)
+      percent_str = format(percent, '0.2E') + ' %'
+    except Exception:
+      percent = None
+      percent_str = "0 %"
+
     return {
       "keys_tested": int(data.get("keys_tested", 0)),
-      "total_keys_tested": int(data.get("total_keys_tested", 0)),
+      "total_keys_tested": total_tested,
       "btc_hits": int(data.get("btc_hits", 0)),
       "btc_address_matches": int(data.get("btc_address_matches", 0)),
       "last_btc_address": last_addr_display,
@@ -313,7 +390,13 @@ def load_generator_status():
       "last_update": data.get("last_update", "-"),
       "keys_per_minute": speed * 60,
       "keys_per_day": speed * 86400,
+      "percent_tested": percent,
+      "percent_tested_str": percent_str,
+      # Human/scientific representations for UI
+      "total_keyspace_str": format(SECP256K1_N, '0.2E'),
+      "total_tested_str": format(total_tested, '0.2E'),
     }
+
 
 def get_system_status():
     if psutil is None:
@@ -323,22 +406,98 @@ def get_system_status():
         }
 
     try:
-        cpu = psutil.cpu_percent(interval=0.0)
-        mem = psutil.virtual_memory()
-        used_gb = mem.used / (1024**3)
-        total_gb = mem.total / (1024**3)
-        ram_text = f"{used_gb:.1f} / {total_gb:.1f} GB ({mem.percent:.0f}%)"
 
-        return {
-            "cpu_text": f"{cpu:.1f} %",
-            "ram_text": ram_text,
-        }
+        def get_db_status():
+            """Return DB existence, row count and last modified timestamp for generator DB."""
+            if not os.path.exists(GEN_DB):
+                return {"exists": False, "rows": None, "last_modified": None}
 
-    except Exception:
-        return {
-            "cpu_text": "-",
-            "ram_text": "-",
-        }
+            try:
+                mtime = os.path.getmtime(GEN_DB)
+                last_modified = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mtime))
+            except Exception:
+                last_modified = None
+
+            rows = None
+            try:
+                conn = sqlite3.connect(GEN_DB)
+                cur = conn.cursor()
+                cur.execute("SELECT COUNT(*) FROM btc_addresses")
+                rows = cur.fetchone()[0]
+                conn.close()
+            except Exception:
+                rows = None
+
+            return {"exists": True, "rows": rows, "last_modified": last_modified}
+
+
+        def tail_lines(path: str, lines: int = 200) -> str:
+            try:
+                with open(path, 'rb') as f:
+                    f.seek(0, os.SEEK_END)
+                    end = f.tell()
+                    size = 1024
+                    data = b''
+                    while end > 0 and lines > 0:
+                        start = max(0, end - size)
+                        f.seek(start)
+                        chunk = f.read(end - start)
+                        data = chunk + data
+                        end = start
+                        if data.count(b'\n') >= lines:
+                            break
+                    text = data.decode('utf-8', errors='replace')
+                    return '\n'.join(text.splitlines()[-lines:])
+            except Exception:
+                return ''
+
+
+        def get_importer_status():
+            """Read importer log and extract last import duration and last log line."""
+            if not os.path.exists(IMPORTER_LOG):
+                return {"last_line": None, "import_duration": None}
+
+            text = tail_lines(IMPORTER_LOG, lines=200)
+            if not text:
+                return {"last_line": None, "import_duration": None}
+
+            lines = [l.strip() for l in text.splitlines() if l.strip()]
+            last_line = lines[-1] if lines else None
+
+            # Try to find the "Import terminé" line and extract minutes
+            duration = None
+            for l in reversed(lines):
+                m = re.search(r"Import terminé: .* en ([0-9]+\.[0-9]) min", l)
+                if not m:
+                    m = re.search(r"Import terminé: .* en ([0-9]+) min", l)
+                if m:
+                    duration = f"{m.group(1)} min"
+                    break
+
+            # Fallback: search for Download or ANALYZE/VACUUM duration lines
+            if duration is None:
+                for l in reversed(lines):
+                    m = re.search(r"Download OK: .* en ([0-9]+\.[0-9])s", l)
+                    if m:
+                        duration = f"download {m.group(1)}s"
+                        break
+
+            return {"last_line": last_line, "import_duration": duration}
+      if not m:
+        m = re.search(r"Import terminé: .* en ([0-9]+) min", l)
+      if m:
+        duration = f"{m.group(1)} min"
+        break
+
+    # Fallback: search for Download or ANALYZE/VACUUM duration lines
+    if duration is None:
+      for l in reversed(lines):
+        m = re.search(r"Download OK: .* en ([0-9]+\.[0-9])s", l)
+        if m:
+          duration = f"download {m.group(1)}s"
+          break
+
+    return {"last_line": last_line, "import_duration": duration}
 
 @app.route("/")
 def index():
@@ -346,11 +505,15 @@ def index():
 
 @app.route("/api/status")
 def api_status():
-    return jsonify({
-        "generator": load_generator_status(),
-        "system": get_system_status(),
-        "timestamp": time.time(),
-    })
+  status = {
+    "generator": load_generator_status(),
+    "system": get_system_status(),
+    "database": get_db_status(),
+    "timestamp": time.time(),
+  }
+  # Add importer info
+  status["importer"] = get_importer_status()
+  return jsonify(status)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
